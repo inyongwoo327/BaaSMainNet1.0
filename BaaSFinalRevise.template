@@ -1,0 +1,1878 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Deploy HDAC Core on AWS",
+    "Parameters": {
+        "AvailabilityZone": {
+          "Type": "AWS::EC2::AvailabilityZone::Name",
+          "Description": "Choose and write down the correct availability zone based on chosen region.",
+          "ConstraintDescription": "For Example, you can choose one among us-west-2a, us-west-2b, and us-west-2c in us-west-2 region."
+        },
+        "CountCoreInstances": {
+            "Description": "HDAC Core Node Cluster size; must be between 1 and 15",
+            "Type": "Number",
+            "MinValue": "1",
+            "MaxValue": "15",
+            "Default": "1",
+            "AllowedValues": [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15"
+            ]
+        },
+        "VpcCIDR": {
+            "Description": "Please enter the IP range (CIDR notation) for this VPC",
+            "Type": "String",
+            "Default": "10.0.0.0/16",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "Must be a valid IP CIDR range of the form x.x.x.x/x."
+        },
+        "PublicSubnetCIDR": {
+            "Description": "Please enter the IP range (CIDR notation) for the public subnet",
+            "Type": "String",
+            "Default": "10.0.1.0/24",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "Must be a valid IP CIDR range of the form x.x.x.x/x."
+        },
+        "PrivateSubnetCIDR": {
+            "Description": "Please enter the IP range (CIDR notation) for the private subnet",
+            "Type": "String",
+            "Default": "10.0.2.0/24",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "Must be a valid IP CIDR range of the form x.x.x.x/x."
+        },
+        "SecurityGroupExplorerCIDR": {
+            "Description": "Please enter the IP range (CIDR notation) for the Explorer",
+            "Type": "String",
+            "Default": "0.0.0.0/0",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "Must be a valid IP CIDR range of the form x.x.x.x/x."
+        },
+        "SecurityGroupCoreCIDR": {
+            "Description": "Please enter the IP range (CIDR notation) for the Private Core",
+            "Type": "String",
+            "Default": "10.0.1.0/24",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "Private Core Nodes allow access from Bastion Hosts in Public Subnet (10.0.1.0/24). Must be a valid IP CIDR range of the form x.x.x.x/x."
+        },
+        "KeyName": {
+            "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+            "Type": "AWS::EC2::KeyPair::KeyName",
+            "ConstraintDescription": "The name of an existing EC2 KeyPair."
+        },
+        "InstanceType": {
+            "Description": "HDAC Core EC2 Instance Type.\nSince me-south-1 and eu-north-1 regions don't provide t2 instances, choose t3.micro or above type in the regions.",
+            "Type": "String",
+            "Default": "t3.micro",
+            "AllowedValues": [
+                "t2.micro",
+                "t3.micro",
+                "t3.medium",
+                "t3.large"
+            ],
+            "ConstraintDescription": "Must have a valid EC2 instance type for core nodes."
+        },
+        "InstanceTypeExplorer": {
+            "Description": "HDAC Explorer EC2 Instance Type.\nClick t3.micro if you don't want an Explorer but a bastion host instance to connect private code nodes.\nIf you want the Explorer, you must choose m4.large or above.",
+            "Type": "String",
+            "Default": "m4.large",
+            "AllowedValues": [
+                "t3.micro",
+                "m4.large",
+                "m4.xlarge",
+                "m4.2xlarge"
+            ],
+            "ConstraintDescription": "Must have a valid EC2 instance type."
+        }
+    },
+    "Mappings": {
+        "AWSAMIRegionMap": {
+            "us-east-1": {
+                "HVM": "ami-013b33dbdf521e9c8",
+                "HVMSlave": "ami-0dca1c5b2a1856937",
+                "HVMExplorer": "ami-0ed26c9743b6e5552"
+            },
+            "us-east-2": {
+                "HVM": "ami-05a97a78c5e896bb8",
+                "HVMSlave": "ami-098370c0335d11d6c",
+                "HVMExplorer": "ami-06e8db8270ceecc70"
+            },
+            "us-west-1": {
+                "HVM": "ami-02cfbfe1a2c19412c",
+                "HVMSlave": "ami-07bc369967c611750",
+                "HVMExplorer": "ami-054ea73c74a2fb0eb"
+            },
+            "us-west-2": {
+                "HVM": "ami-017fece6f69f5871c",
+                "HVMSlave": "ami-00f4323ee1c2ffe51",
+                "HVMExplorer": "ami-0234178b7f33687f3"
+            },
+            "ap-east-1": {
+                "HVM": "ami-0efb352a9153fb15c",
+                "HVMSlave": "ami-030aebd444863a0bb",
+                "HVMExplorer": "ami-0d37b3f3297bb12a7"
+            },
+            "ap-south-1": {
+                "HVM": "ami-00a0dbefd53ded649",
+                "HVMSlave": "ami-0a146275d913ba044",
+                "HVMExplorer": "ami-028b12563f1ed1d6a"
+            },
+            "ap-northeast-1": {
+                "HVM": "ami-0a1a857152fe5eab3",
+                "HVMSlave": "ami-0cb347b58c3daf25d",
+                "HVMExplorer": "ami-087e6a33b5e5cd924"
+            },
+            "ap-northeast-2": {
+                "HVM": "ami-00d0ffc2941fbe4b0",
+                "HVMSlave": "ami-0882548e9cb5b96d9",
+                "HVMExplorer": "ami-04392b5eadb8651df"
+            },
+            "ap-southeast-1": {
+                "HVM": "ami-072d0ff66e77cfbd3",
+                "HVMSlave": "ami-0721f8327f8480185",
+                "HVMExplorer": "ami-0e9c1abc2ed8549b7"
+            },
+            "ap-southeast-2": {
+                "HVM": "ami-0c22419f11c79b587",
+                "HVMSlave": "ami-0304acfb561b5c282",
+                "HVMExplorer": "ami-026470fc635c3ad9d"
+            },
+            "ca-central-1": {
+                "HVM": "ami-0c0f2ee1ab977aa61",
+                "HVMSlave": "ami-02f0df15214caf6f1",
+                "HVMExplorer": "ami-0029452cea647b446"
+            },
+            "eu-central-1": {
+                "HVM": "ami-094dcf774d6105c7b",
+                "HVMSlave": "ami-0968f7edd01ee60e2",
+                "HVMExplorer": "ami-01a5dbb9d3efda3cd"
+            },
+            "eu-west-1": {
+                "HVM": "ami-0e9e11c4a92e3e251",
+                "HVMSlave": "ami-09ca134a26604f434",
+                "HVMExplorer": "ami-094e03c92dc422b17"
+            },
+            "eu-west-2": {
+                "HVM": "ami-001341789f8c71f2f",
+                "HVMSlave": "ami-08ee6d04f0c74ede6",
+                "HVMExplorer": "ami-0dfafd3f6f0183966"
+            },
+            "eu-west-3": {
+                "HVM": "ami-024a3f59280e9db4c",
+                "HVMSlave": "ami-00b6520f749cfdb42",
+                "HVMExplorer": "ami-0bb410af9bfbc7296"
+            },
+            "eu-north-1": {
+                "HVM": "ami-04976cb9ce8f4a28d",
+                "HVMSlave": "ami-02c06fce02b87e814",
+                "HVMExplorer": "ami-09000c972b7469215"
+            },
+            "me-south-1": {
+                "HVM": "ami-01395fbe0dea0623f",
+                "HVMSlave": "ami-0f5bbd39ec9e3270d",
+                "HVMExplorer": "ami-0fd417a64ef658f8a"
+            },
+            "sa-east-1": {
+                "HVM": "ami-0407b815cadb50995",
+                "HVMSlave": "ami-0961070a2a0a3e368",
+                "HVMExplorer": "ami-04c408247ee757b06"
+            }
+        }
+    },
+    "Conditions": {
+        "Create15Nodes": {
+            "Fn::Equals": [
+                "15",
+                {
+                    "Ref": "CountCoreInstances"
+                }
+            ]
+        },
+        "Create14Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "14",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create15Nodes"
+                }
+            ]
+        },
+        "Create13Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "13",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create14Nodes"
+                }
+            ]
+        },
+        "Create12Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "12",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create13Nodes"
+                }
+            ]
+        },
+        "Create11Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "11",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create12Nodes"
+                }
+            ]
+        },
+        "Create10Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "10",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create11Nodes"
+                }
+            ]
+        },
+        "Create9Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "9",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create10Nodes"
+                }
+            ]
+        },
+        "Create8Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "8",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create9Nodes"
+                }
+            ]
+        },
+        "Create7Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "7",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create8Nodes"
+                }
+            ]
+        },
+        "Create6Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "6",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create7Nodes"
+                }
+            ]
+        },
+        "Create5Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "5",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create6Nodes"
+                }
+            ]
+        },
+        "Create4Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "4",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create5Nodes"
+                }
+            ]
+        },
+        "Create3Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "3",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create4Nodes"
+                }
+            ]
+        },
+        "Create2Nodes": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "2",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create3Nodes"
+                }
+            ]
+        },
+        "Create1Node": {
+            "Fn::Or": [
+                {
+                    "Fn::Equals": [
+                        "1",
+                        {
+                            "Ref": "CountCoreInstances"
+                        }
+                    ]
+                },
+                {
+                    "Condition": "Create2Nodes"
+                }
+            ]
+        }
+    },
+    "Resources": {
+        "VPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": {
+                    "Ref": "VpcCIDR"
+                },
+                "EnableDnsSupport": true,
+                "EnableDnsHostnames": true
+            }
+        },
+        "InternetGateway": {
+            "Type": "AWS::EC2::InternetGateway",
+            "Properties": {
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "Internet gateway"
+                    }
+                ]
+            },
+            "DependsOn" : "VPC"
+        },
+        "InternetGatewayAttachment": {
+            "Type": "AWS::EC2::VPCGatewayAttachment",
+            "Properties": {
+                "InternetGatewayId": {
+                    "Ref": "InternetGateway"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "DependsOn" : "InternetGateway"
+        },
+        "PublicSubnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "AvailabilityZone" : {
+                    "Ref": "AvailabilityZone"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "CidrBlock": {
+                    "Ref": "PublicSubnetCIDR"
+                },
+                "MapPublicIpOnLaunch": true,
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Public Subnet"
+                        }
+                    }
+                ]
+            },
+            "DependsOn" : "InternetGatewayAttachment"
+        },
+        "PrivateSubnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "AvailabilityZone" : {
+                    "Ref": "AvailabilityZone"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "CidrBlock": {
+                    "Ref": "PrivateSubnetCIDR"
+                },
+                "MapPublicIpOnLaunch": false,
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Subnet"
+                        }
+                    }
+                ]
+            },
+            "DependsOn" : "PublicSubnet"
+        },
+        
+        "PublicRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Public Routes"
+                        }
+                    }
+                ]
+            },
+            "DependsOn" : "PublicSubnet"
+        },
+        "DefaultPublicRoute": {
+            "Type": "AWS::EC2::Route",
+            "DependsOn": "InternetGatewayAttachment",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "PublicRouteTable"
+                },
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": {
+                    "Ref": "InternetGateway"
+                }
+            }
+            
+        },
+        "PublicSubnetRouteTableAssociation": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "PublicRouteTable"
+                },
+                "SubnetId": {
+                    "Ref": "PublicSubnet"
+                }
+            },
+            "DependsOn" : "PublicSubnet"
+        },
+        "PrivateRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Routes"
+                        }
+                    }
+                ]
+            },
+            "DependsOn" : "PrivateSubnet"
+        },
+        "PrivateSubnetRouteTableAssociation": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "PrivateRouteTable"
+                },
+                "SubnetId": {
+                    "Ref": "PrivateSubnet"
+                }
+            },
+            "DependsOn" : "PrivateRouteTable"
+        },
+        
+        "Instance1": {
+            "Condition": "Create1Node",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVM"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "PrivateIpAddress": "10.0.2.152",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - SeedNode"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "cd $DIR\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain --datadir=/home/ubuntu/.hdac -daemon -gen=1\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "PublicSubnet"
+        },
+        "Instance2": {
+            "Condition": "Create2Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#1"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance3": {
+            "Condition": "Create3Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#2"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance4": {
+            "Condition": "Create4Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#3"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance5": {
+            "Condition": "Create5Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#4"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance6": {
+            "Condition": "Create6Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#5"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance7": {
+            "Condition": "Create7Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#6"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance8": {
+            "Condition": "Create8Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#7"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance9": {
+            "Condition": "Create9Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#8"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance10": {
+            "Condition": "Create10Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#9"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                         
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance11": {
+            "Condition": "Create11Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#10"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                              
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance12": {
+            "Condition": "Create12Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#11"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance13": {
+            "Condition": "Create13Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#12"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance14": {
+            "Condition": "Create14Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#13"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        "Instance15": {
+            "Condition": "Create15Nodes",
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMSlave"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupCore"
+                            }
+                        ],
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PrivateSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Private Core - Slave Node_peer#14"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "DIR=\"/home/ubuntu/privatecore\"\n",
+                                "SUBDIR=\"/home/ubuntu/.hdac\"\n",
+                                "mkdir $SUBDIR\n",
+                                "cd $DIR\n",
+                                
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "GETCOMMAND=\"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "$GETCOMMAND > tmp.txt\n",
+                                "COUNT=0\n",
+                                "COM=\"\"\n",
+                                "while IFS= read -r line\n",
+                                "do\n",
+                                "COUNT=`expr $COUNT + 1`\n",
+                                "if [ $COUNT -eq 6 ]; then\n",
+                                "COM=\"$line\"\n",
+                                "fi\n",
+                                "done<\"tmp.txt\"\n",
+                                
+                                "ADDRESSCOMMAND=${COM:21}\n",
+                                
+                                "sudo chmod 777 -R /home/ubuntu/.hdac/\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdac-cli -rpcport=2280 -rpcuser=hdacrpc -rpcconnect=10.0.2.152 -rpcpassword=1234 masterchain ${ADDRESSCOMMAND}\"\n",
+                                "su - ubuntu -c \"/home/ubuntu/privatecore/hdacd masterchain@10.0.2.152:2281 --datadir=/home/ubuntu/.hdac -daemon\"\n",
+                                "rm -rf \"tmp.txt\"\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        
+        "ExploreInstance": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSAMIRegionMap",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "HVMExplorer"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceTypeExplorer"
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "GroupSet": [
+                            {
+                                "Ref": "SecurityGroupExplorer"
+                            }
+                        ],
+                        "AssociatePublicIpAddress": "true",
+                        "DeleteOnTermination": "true",
+                        "DeviceIndex": "0",
+                        "SubnetId": {
+                            "Ref": "PublicSubnet"
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "Bastion Host (Explorer as made)"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "SUB=\"/hdac_data/log/explorer\"\n",
+                                "sleep 90\n",
+                                "cd $SUB\n",
+                                "sudo rm -rf \"explorer.log\"\n",
+                                "sudo rm -rf \"explorer.log.2019-12-13\"\n",
+                                "DIR=\"/home/ubuntu/docker\"\n",
+                                "cd $DIR\n",
+                                
+                                "sh docker.sh run --datadir=/home/ubuntu/docker\n"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "DependsOn" : "Instance1"
+        },
+        
+        "SecurityGroupExplorer": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Security Group For Explorer",
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": {
+                            "Ref": "SecurityGroupExplorerCIDR"
+                        },
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "IpProtocol": "tcp"
+                    },
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "FromPort": "80",
+                        "ToPort": "80",
+                        "IpProtocol": "tcp"
+                    },
+                    {
+                        "CidrIp": "0.0.0.0/0",
+                        "FromPort": "8080",
+                        "ToPort": "8080",
+                        "IpProtocol": "tcp"
+                    }
+                ],
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "SecurityGroupCore": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "SecurityGroup For Core Instances",
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": {
+                            "Ref": "SecurityGroupCoreCIDR"
+                        },
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "IpProtocol": "tcp"
+                    },
+                    {
+                        "CidrIp": {
+                            "Ref": "PrivateSubnetCIDR"
+                        },
+                        "FromPort": "2280",
+                        "ToPort": "2281",
+                        "IpProtocol": "tcp"
+                    },
+                    {
+                        "CidrIp": {
+                            "Ref": "PublicSubnetCIDR"
+                        },
+                        "FromPort": "2280",
+                        "ToPort": "2281",
+                        "IpProtocol": "tcp"
+                    }
+                ],
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "PrivateCoreInstancesCount": {
+            "Description": "Number of Private Core instances",
+            "Value": {
+                "Ref": "CountCoreInstances"
+            }
+        },
+        "AvailabilityZoneOutput": {
+            "Description": "Availability Zone of current region",
+            "Value": {
+                "Ref": "AvailabilityZone"
+            }
+        },
+        "MyInstanceRegion": {
+            "Description": "Current instances' region",
+            "Value": {
+                "Ref": "AWS::Region"
+            }
+        },
+        "MyKeyName": {
+            "Description": "Key Name for current instances",
+            "Value": {
+                "Ref": "KeyName"
+            }
+        }
+    }
+}
